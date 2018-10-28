@@ -1,33 +1,34 @@
-module Main exposing (..)
+module Main exposing (Ball, Control, Direction(..), Game, Model, Moving(..), Msg(..), Paddle, Side(..), aspectRatio, ballAcceleration, ballRadius, boxHeight, boxWidth, defaultViewbox, init, initBallSpeed, main, pad, paddleHeight, paddleWidth, randomSideAndMoving, subscriptions, update, updateBall, updateDone, updatePaddle, updatePaddlePosition, view, viewBall, viewPaddle, viewTime)
 
-import Time exposing (Time, second, millisecond)
-import Html exposing (..)
-import Html.Attributes as HtmlAttr
-import Svg exposing (..)
-import Svg.Attributes
-    exposing
-        ( viewBox
-        , x
-        , y
-        , width
-        , height
-        , fill
-        , cx
-        , cy
-        , r
-        , preserveAspectRatio
-        , textAnchor
-        , fillOpacity
-        )
 import Bootstrap.CDN as CDN
 import Bootstrap.Grid as Grid
 import Bootstrap.Grid.Row as Row
-import Keyboard.Extra exposing (Key(..))
+import Browser exposing (Document)
+import Html exposing (..)
+import Html.Attributes as HtmlAttr
+import Keyboard exposing (Key(..), KeyChange(..), KeyParser, RawKey, characterKey)
+import Svg exposing (..)
+import Svg.Attributes
+    exposing
+        ( cx
+        , cy
+        , fill
+        , fillOpacity
+        , height
+        , preserveAspectRatio
+        , r
+        , textAnchor
+        , viewBox
+        , width
+        , x
+        , y
+        )
+import Time exposing (Posix)
 
 
-main : Program Never Model Msg
+main : Program () Model Msg
 main =
-    Html.program
+    Browser.document
         { init = init
         , update = update
         , subscriptions = subscriptions
@@ -88,10 +89,10 @@ type alias Model =
 
 
 type Msg
-    = KeyDown Key
-    | KeyUp Key
-    | Frame Time
-    | Tick Time
+    = KeyDown RawKey
+    | KeyUp RawKey
+    | Frame Posix
+    | Tick Posix
     | Restart Game
 
 
@@ -140,7 +141,7 @@ ballAcceleration =
     0.05
 
 
-init : ( Model, Cmd Msg )
+init : () -> ( Model, Cmd Msg )
 init =
     let
         paddleY =
@@ -153,20 +154,20 @@ init =
             (boxHeight - ballRadius) / 2
 
         leftPaddle =
-            Paddle paddleY Left Nothing (Control CharA CharZ)
+            Paddle paddleY Left Nothing (Control (Keyboard.Character "a") (Keyboard.Character "z"))
 
         rightPaddle =
-            Paddle paddleY Right Nothing (Control Quote Slash)
+            Paddle paddleY Right Nothing (Control (Keyboard.Character "'") (Keyboard.Character "/"))
 
         ball =
             Ball ( ballX, ballY ) Nothing Nothing
     in
-        ( Game leftPaddle rightPaddle ball initBallSpeed False 0 0 0, Cmd.none )
+    \_ -> ( Game leftPaddle rightPaddle ball initBallSpeed False 0 0 0, Cmd.none )
 
 
 randomSideAndMoving : Int -> ( Side, Moving )
 randomSideAndMoving seed =
-    case seed % 8 of
+    case modBy 8 seed of
         0 ->
             ( Left, Up )
 
@@ -197,10 +198,10 @@ subscriptions game =
 
         False ->
             Sub.batch
-                [ Keyboard.Extra.downs KeyDown
-                , Keyboard.Extra.ups KeyUp
-                , Time.every (2 * millisecond) Frame
-                , Time.every second Tick
+                [ Keyboard.downs KeyDown
+                , Keyboard.ups KeyUp
+                , Time.every 2 Frame
+                , Time.every 1000 Tick
                 ]
 
 
@@ -260,18 +261,22 @@ updateBall msg game ball =
         nextMoving =
             if y <= 0 + ballRadius then
                 Just Down
+
             else if y >= (boxHeight - ballRadius) then
                 Just Up
+
             else if x <= paddleWidth || x >= boxWidth - paddleWidth then
                 Just moving
+
             else
                 case ball.moving of
-                    Just moving ->
+                    Just _ ->
                         ball.moving
 
                     Nothing ->
                         if game.seed == 0 then
                             Nothing
+
                         else
                             Just moving
 
@@ -283,7 +288,7 @@ updateBall msg game ball =
                 paddleEnd =
                     paddleStart + paddleHeight
             in
-                y <= paddleEnd && y >= paddleStart
+            y <= paddleEnd && y >= paddleStart
 
         betweenRightPaddle =
             let
@@ -293,29 +298,32 @@ updateBall msg game ball =
                 paddleEnd =
                     paddleStart + paddleHeight
             in
-                y <= paddleEnd && y >= paddleStart
+            y <= paddleEnd && y >= paddleStart
 
         nextSide =
             if x <= paddleWidth && betweenLeftPaddle then
                 Just Right
+
             else if x >= boxWidth - paddleWidth && betweenRightPaddle then
                 Just Left
+
             else
                 case ball.side of
-                    Just side ->
+                    Just _ ->
                         ball.side
 
                     Nothing ->
                         if game.seed == 0 then
                             Nothing
+
                         else
                             Just side
     in
-        { ball
-            | center = ( nextPosX, nextPosY )
-            , moving = nextMoving
-            , side = nextSide
-        }
+    { ball
+        | center = ( nextPosX, nextPosY )
+        , moving = nextMoving
+        , side = nextSide
+    }
 
 
 updatePaddlePosition : Paddle -> Paddle
@@ -341,25 +349,46 @@ updatePaddlePosition paddle =
                 Nothing ->
                     pos
     in
-        { paddle | position = nextPosition }
+    { paddle | position = nextPosition }
 
 
 updatePaddle : Msg -> Paddle -> Paddle
 updatePaddle msg paddle =
     case msg of
-        KeyDown key ->
-            if key == paddle.control.up then
-                { paddle | moving = Just Up }
-            else if key == paddle.control.down then
-                { paddle | moving = Just Down }
-            else
-                paddle
+        KeyDown rawKey ->
+            let
+                maybeKey =
+                    characterKey rawKey
+            in
+            case maybeKey of
+                Just key ->
+                    if key == paddle.control.up then
+                        { paddle | moving = Just Up }
 
-        KeyUp key ->
-            if key == paddle.control.up || key == paddle.control.down then
-                { paddle | moving = Nothing }
-            else
-                paddle
+                    else if key == paddle.control.down then
+                        { paddle | moving = Just Down }
+
+                    else
+                        paddle
+
+                Nothing ->
+                    paddle
+
+        KeyUp rawKey ->
+            let
+                maybeKey =
+                    characterKey rawKey
+            in
+            case maybeKey of
+                Just key ->
+                    if key == paddle.control.up || key == paddle.control.down then
+                        { paddle | moving = Nothing }
+
+                    else
+                        paddle
+
+                Nothing ->
+                    paddle
 
         Frame _ ->
             updatePaddlePosition paddle
@@ -388,10 +417,11 @@ updateDone msg ball =
                 _ =
                     rightHitbox >= boxWidth
             in
-                if leftHitbox <= 0 || rightHitbox >= boxWidth then
-                    True
-                else
-                    False
+            if leftHitbox <= 0 || rightHitbox >= boxWidth then
+                True
+
+            else
+                False
 
         _ ->
             False
@@ -408,8 +438,9 @@ update msg game =
                 , ballSpeed =
                     case msg of
                         Tick time ->
-                            if (game.seconds % 15 == 0) then
+                            if modBy 15 game.seconds == 0 then
                                 game.ballSpeed + ballAcceleration
+
                             else
                                 game.ballSpeed
 
@@ -432,22 +463,23 @@ update msg game =
                             game.seconds
                 , seed =
                     case msg of
-                        Frame time ->
-                            time |> Time.inMilliseconds |> round
+                        Frame posix ->
+                            posix |> Time.posixToMillis
 
                         _ ->
                             game.seed
             }
     in
-        ( nextGame, Cmd.none )
+    ( nextGame, Cmd.none )
 
 
-view : Model -> Html Msg
+view : Model -> Document Msg
 view game =
     let
         styles =
             if game.done then
-                [ HtmlAttr.style [ ( "opacity", "0.5" ) ] ]
+                [ HtmlAttr.style "opacity" "0.5" ]
+
             else
                 []
 
@@ -475,11 +507,13 @@ view game =
                             Nothing ->
                                 []
                 in
-                    gameOverText
+                gameOverText
+
             else
                 []
     in
-        Grid.containerFluid []
+    Document "Pong"
+        [ Grid.containerFluid []
             [ CDN.stylesheet
             , Grid.row []
                 [ Grid.col []
@@ -499,18 +533,19 @@ view game =
                     ]
                 ]
             ]
+        ]
 
 
 viewTime : Int -> Html Msg
 viewTime seconds =
     let
         mins =
-            seconds // 60 |> toString
+            seconds // 60 |> String.fromInt
 
         secs =
-            seconds % 60 |> toString |> String.padLeft 2 '0'
+            modBy 60 seconds |> String.fromInt |> String.padLeft 2 '0'
     in
-        Html.text (mins ++ ":" ++ secs)
+    Html.text (mins ++ ":" ++ secs)
 
 
 viewPaddle : Bool -> Paddle -> Svg Msg
@@ -524,18 +559,19 @@ viewPaddle done paddle =
                 Right ->
                     ( boxWidth - paddleWidth, "green" )
     in
-        rect
-            [ paddleX |> toString |> x
-            , paddle.position |> toString |> y
-            , paddleWidth |> toString |> width
-            , paddleHeight |> toString |> height
-            , fill paddleColor
-            , if done then
-                fillOpacity "0.5"
-              else
-                fillOpacity "1"
-            ]
-            []
+    rect
+        [ paddleX |> String.fromFloat |> x
+        , paddle.position |> String.fromFloat |> y
+        , paddleWidth |> String.fromFloat |> width
+        , paddleHeight |> String.fromFloat |> height
+        , fill paddleColor
+        , if done then
+            fillOpacity "0.5"
+
+          else
+            fillOpacity "1"
+        ]
+        []
 
 
 viewBall : Bool -> Ball -> Svg Msg
@@ -544,22 +580,23 @@ viewBall done ball =
         ( centerX, centerY ) =
             ball.center
     in
-        circle
-            [ centerX |> toString |> cx
-            , centerY |> toString |> cy
-            , r (toString ballRadius)
-            , fill "orange"
-            , if done then
-                fillOpacity "0.5"
-              else
-                fillOpacity "1"
-            ]
-            []
+    circle
+        [ centerX |> String.fromFloat |> cx
+        , centerY |> String.fromFloat |> cy
+        , r (String.fromFloat ballRadius)
+        , fill "orange"
+        , if done then
+            fillOpacity "0.5"
+
+          else
+            fillOpacity "1"
+        ]
+        []
 
 
 defaultViewbox : Html.Attribute Msg
 defaultViewbox =
     [ pad, pad, boxWidth, boxHeight ]
-        |> List.map toString
+        |> List.map String.fromFloat
         |> String.join " "
         |> viewBox
